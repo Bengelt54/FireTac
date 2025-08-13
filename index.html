@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Fireground Preplan — Pumper, Line, Hydrant Recommender (MVP)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+
+<link
+rel="stylesheet"
+href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+crossorigin=""
+/>
+<script
+src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+crossorigin=""
+></script>
+
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+<style>
+html, body { height: 100%; margin: 0; }
+#app { display: grid; grid-template-columns: 320px 1fr; height: 100%; }
+#sidebar {
+box-sizing: border-box;
+padding: 12px 14px;
+border-right: 1px solid #ddd;
+overflow: auto;
+font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+#map { height: 100%; }
+h1 { font-size: 18px; margin: 0 0 8px; }
+h2 { font-size: 14px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .03em; color: #444; }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+button {
+cursor: pointer; border: 1px solid #bbb; background: #fff; border-radius: 6px;
+padding: 8px 10px; font-weight: 600;
+}
+button.primary { background: #0a66ff; color: #fff; border-color: #0a66ff; }
+button.ghost { background: #f7f7f7; }
+select, input[type="number"] {
+width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #bbb; box-sizing: border-box;
+}
+.card {
+border: 1px solid #e4e4e4; border-radius: 8px; padding: 10px; background: #fff; margin-bottom: 10px;
+}
+.muted { color: #666; font-size: 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 6px; font-size: 14px; }
+.kv div:nth-child(odd) { color: #444; }
+.kv div:nth-child(even) { font-weight: 600; }
+.legend { font-size: 12px; color: #444; }
+.legend span.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div id="app">
+<div id="sidebar">
+<h1>Fireground Preplan (Prototype)</h1>
+
+<div class="card">
+<h2>Workflow</h2>
+<ol style="margin:0 0 6px 18px">
+<li>Click <b>Place Pumper</b>, then click the map.</li>
+<li>Click <b>Select Building</b>, then click the target building entrance.</li>
+<li>Choose <b>Building Type</b> (required for line recommendation).</li>
+</ol>
+<div class="btnrow">
+<button id="btnPumper" class="primary">Place Pumper</button>
+<button id="btnBuilding" class="primary">Select Building</button>
+<button id="btnReset" class="ghost">Reset</button>
+</div>
+<label for="btype">Building Type</label>
+<select id="btype">
+<option value="">— choose —</option>
+<option value="residential">Residential (1–2 family)</option>
+<option value="multires">Multi-Residential (garden/MDU)</option>
+<option value="commercial">Commercial (mercantile/office)</option>
+<option value="industrial">Industrial/Warehouse</option>
+<option value="highrise">High-Rise/Standpipe</option>
+<option value="school">School/Assembly</option>
+</select>
+</div>
+
+<div class="card">
+<h2>Add Hydrants</h2>
+<p class="muted">Enter coordinates and click "Add Hydrant" to add them to the map. Example: `39.1052, -84.5121`</p>
+<div style="display:flex; gap: 8px;">
+<input id="hydrantCoords" type="text" placeholder="lat, lng" />
+<button id="addHydrantBtn" class="primary" style="flex-shrink:0;">Add Hydrant</button>
+</div>
+</div>
+
+<div class="card">
+<h2>Results</h2>
+<div class="kv">
+<div>Pumper</div><div id="pumperVal" class="mono">—</div>
+<div>Building</div><div id="buildingVal" class="mono">—</div>
+<div>Distance (ft)</div><div id="distVal">—</div>
+<div>Suggested Stretch (ft)</div><div id="stretchVal">—</div>
+<div>Nearest Hydrant</div><div id="hydrantVal" class="mono">—</div>
+<div>Hydrant Distance (ft)</div><div id="hydrantDistVal">—</div>
+</div>
+</div>
+
+<div class="card" id="recCard">
+<h2>Recommendations</h2>
+<div id="recLine"><i class="muted">Pick a building type to see line recommendations.</i></div>
+<div style="margin-top:6px" class="muted">
+Notes: Distance is straight-line (as the crow flies). Real stretches will be longer around obstacles; add a safety factor.
+</div>
+</div>
+
+<div class="card">
+<h2>Map Legend</h2>
+<div class="legend">
+<div><span class="dot" style="background:#1f77b4"></span>Pumper</div>
+<div><span class="dot" style="background:#d62728"></span>Building</div>
+<div><span class="dot" style="background:#2ca02c"></span>Hydrant</div>
+<div><span class="dot" style="background:#9467bd"></span>Recommended Hydrant</div>
+</div>
+</div>
+
+<div class="muted">
+<p><b>Customize:</b> Edit SOP rules in the script section near the top.</p>
+</div>
+</div>
+<div id="map"></div>
+</div>
+
+<script>
+// ------------------------------------------------------------
+// 1) CONFIG: Initial view and SAMPLE hydrants
+// ------------------------------------------------------------
+
+// Center on Cheviot, Ohio by default
+const INITIAL_CENTER = [39.1417, -84.6062];
+const INITIAL_ZOOM = 16;
+
+// 🔴 Start with an empty array. Hydrants will be added manually by the user.
+let HYDRANTS = [];
+
+// ------------------------------------------------------------
+// 2) CONFIG: Department-editable SOP rules (simple & transparent)
+// Return a structured recommendation given distance + occupancy
+// ------------------------------------------------------------
+// Add a 20% slack factor for real-world hose stretches
+const SLACK_FACTOR = 1.2;
+
+function recommendLine(distanceFt, occupancy) {
+const d = distanceFt * SLACK_FACTOR; // Use adjusted distance for recommendations
+const roundUp50 = (x) => Math.ceil(x / 50) * 50;
+
+const suggestedStretch = roundUp50(d);
+
+// Default fallback
+let rec = {
+primary: "1¾\" attack line (150–200 ft) with 150–185 GPM nozzle",
+backup: "Second 1¾\" or 2\" line as needed",
+notes: [`Suggested stretch ~ ${suggestedStretch} ft (includes slack).`]
+};
+
+// Occupancy-specific heuristics
+switch (occupancy) {
+case "residential":
+if (d <= 200) {
+rec.primary = "1¾\" preconnect (150–200 ft), 150–185 GPM";
+rec.backup = "Backup 1¾\" or 2\"";
+} else if (d <= 300) {
+rec.primary = "2\" line (200–300 ft), 200+ GPM";
+rec.backup = "2½\" as backup for flow/reach";
+} else {
+rec.primary = "2½\" attack or 3\" leader w/ 1¾\" break-off near door";
+rec.backup = "Consider moving pumper up / add company";
+rec.notes.push("Long stretch — consider re-positioning closer if possible.");
+}
+break;
+
+case "multires":
+if (d <= 200) {
+rec.primary = "1¾\" preconnect (150–200 ft), 150–185 GPM";
+rec.backup = "2\" as backup for possible volume";
+} else if (d <= 300) {
+rec.primary = "2\" line (200–300 ft), 200+ GPM";
+rec.backup = "2½\" for volume/stand-off";
+} else {
+rec.primary = "2½\" or 3\" leader with gated wye to 1¾\" at entry";
+rec.backup = "Second line for hallway protection";
+rec.notes.push("Account for interior common areas/long hallways.");
+}
+break;
+
+case "commercial":
+if (d <= 150) {
+rec.primary = "2½\" attack line (250+ GPM) — commercial fireload";
+rec.backup = "Second 2½\" or portable monitor";
+} else if (d <= 300) {
+rec.primary = "2½\" (250+ GPM), consider smooth bore";
+rec.backup = "Blitz line / portable monitor";
+} else {
+rec.primary = "3\" leader to gated wye; 2½\" attack near entry";
+rec.backup = "Portable monitor; evaluate re-positioning";
+rec.notes.push("Distance/flow indicate larger line & possible master stream.");
+}
+break;
+
+case "industrial":
+if (d <= 150) {
+rec.primary = "2½\" attack (250–325+ GPM) — high fireload";
+rec.backup = "Portable monitor / additional 2½\"";
+} else if (d <= 300) {
+rec.primary = "2½\" or 3\" leader w/ 2½\" finish";
+rec.backup = "Blitz/monitor; exposure protection";
+} else {
+rec.primary = "3\" leader + gated wye, 2½\" near seat or monitor";
+rec.backup = "Consider defensive posture if conditions dictate";
+rec.notes.push("Long lay; prioritize water supply & big water.");
+}
+break;
+
+case "school":
+if (d <= 200) {
+rec.primary = "2\" line (200+ GPM) for larger compartments";
+rec.backup = "2½\" backup; prioritize search/evac";
+} else if (d <= 300) {
+rec.primary = "2½\" preferred for reach/volume";
+rec.backup = "Second 2½\" or monitor for coverage";
+} else {
+rec.primary = "3\" leader + gated wye; 2\"/2½\" inside";
+rec.backup = "Monitor; consider re-positioning for shorter stretch";
+}
+break;
+
+case "highrise":
+rec.primary = "Standpipe operation: 2½\" from floor below, smooth bore tip";
+rec.backup = "Reduce to 1¾\" only per SOPs/risers after control";
+rec.notes.push("Hook to FDC; pumper supports standpipe. Distance street→door less critical than riser layout.");
+break;
+}
+
+return { ...rec, suggestedStretch };
+}
+
+// ------------------------------------------------------------
+// 3) MAP + STATE
+// ------------------------------------------------------------
+const map = L.map('map', { zoomControl: true }).setView(INITIAL_CENTER, INITIAL_ZOOM);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+maxZoom: 20,
+attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+// Icons
+const iconPumper = L.divIcon({
+html: '<div style="width:14px;height:14px;background:#1f77b4;border:2px solid #0d3d74;border-radius:50%"></div>',
+className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+});
+const iconBuilding = L.divIcon({
+html: '<div style="width:14px;height:14px;background:#d62728;border:2px solid #7a1515;border-radius:4px"></div>',
+className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+});
+const iconHydrant = L.divIcon({
+html: '<div style="width:10px;height:10px;background:#2ca02c;border:2px solid #195d19;border-radius:50%"></div>',
+className: '', iconSize: [14, 14], iconAnchor: [7, 7]
+});
+const iconHydrantPick = L.divIcon({
+html: '<div style="width:12px;height:12px;background:#9467bd;border:2px solid #4e2b7a;border-radius:50%"></div>',
+className: '', iconSize: [16, 16], iconAnchor: [8, 8]
+});
+
+// State
+let mode = null; // 'pumper' | 'building' | null
+let pumperMarker = null, buildingMarker = null;
+let hydrantMarkers = [];
+let nearestHydrantMarker = null;
+let linePumperToBuilding = null, linePumperToHydrant = null;
+
+// UI refs
+const btnPumper = document.getElementById('btnPumper');
+const btnBuilding = document.getElementById('btnBuilding');
+const btnReset = document.getElementById('btnReset');
+const addHydrantBtn = document.getElementById('addHydrantBtn');
+const hydrantCoordsInput = document.getElementById('hydrantCoords');
+const btype = document.getElementById('btype');
+
+const pumperVal = document.getElementById('pumperVal');
+const buildingVal = document.getElementById('buildingVal');
+const distVal = document.getElementById('distVal');
+const stretchVal = document.getElementById('stretchVal');
+const hydrantVal = document.getElementById('hydrantVal');
+const hydrantDistVal = document.getElementById('hydrantDistVal');
+const recLine = document.getElementById('recLine');
+
+function fmtLatLng(latlng) {
+return `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
+}
+
+function setMode(newMode) {
+mode = newMode;
+btnPumper.classList.toggle('primary', mode === 'pumper');
+btnBuilding.classList.toggle('primary', mode === 'building');
+}
+
+btnPumper.addEventListener('click', () => setMode('pumper'));
+btnBuilding.addEventListener('click', () => setMode('building'));
+btnReset.addEventListener('click', resetAll);
+addHydrantBtn.addEventListener('click', addHydrant);
+btype.addEventListener('change', updateEverything);
+
+// Place hydrants
+const hydrantLayer = L.layerGroup().addTo(map);
+function renderHydrants() {
+hydrantLayer.clearLayers();
+hydrantMarkers = HYDRANTS.map(h => {
+const m = L.marker([h.lat, h.lng], { icon: iconHydrant })
+.addTo(hydrantLayer)
+.bindTooltip(`Hydrant ${h.id}`, { direction: 'top', offset: [0, -8] });
+m.feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [h.lng, h.lat] }, properties: { id: h.id } };
+return m;
+});
+}
+renderHydrants();
+
+// Function to add a hydrant from user input
+function addHydrant() {
+const coords = hydrantCoordsInput.value.split(',').map(c => c.trim());
+if (coords.length === 2) {
+const lat = parseFloat(coords[0]);
+const lng = parseFloat(coords[1]);
+
+if (!isNaN(lat) && !isNaN(lng)) {
+// Create a unique ID for the new hydrant
+const newId = `M-${HYDRANTS.length + 1}`;
+HYDRANTS.push({ id: newId, lat, lng });
+
+// Re-render all hydrants to include the new one
+renderHydrants();
+// Clear the input field
+hydrantCoordsInput.value = '';
+// Update the map (in case pumper and building are already placed)
+updateEverything();
+} else {
+alert('Invalid coordinates. Please enter a valid number pair.');
+}
+} else {
+alert('Please enter coordinates in the format: lat, lng');
+}
+}
+
+// Map click handler
+map.on('click', (e) => {
+if (!mode) return;
+
+if (mode === 'pumper') {
+if (pumperMarker) map.removeLayer(pumperMarker);
+pumperMarker = L.marker(e.latlng, { icon: iconPumper, draggable: true }).addTo(map).bindTooltip('Pumper', {permanent:false});
+pumperMarker.on('dragend', updateEverything);
+pumperVal.textContent = fmtLatLng(e.latlng);
+setMode(null);
+updateEverything();
+} else if (mode === 'building') {
+if (buildingMarker) map.removeLayer(buildingMarker);
+buildingMarker = L.marker(e.latlng, { icon: iconBuilding, draggable: true }).addTo(map).bindTooltip('Building', {permanent:false});
+buildingMarker.on('dragend', updateEverything);
+buildingVal.textContent = fmtLatLng(e.latlng);
+setMode(null);
+updateEverything();
+}
+});
+
+function resetAll() {
+mode = null;
+if (pumperMarker) { map.removeLayer(pumperMarker); pumperMarker = null; }
+if (buildingMarker) { map.removeLayer(buildingMarker); buildingMarker = null; }
+if (nearestHydrantMarker) { map.removeLayer(nearestHydrantMarker); nearestHydrantMarker = null; }
+if (linePumperToBuilding) { map.removeLayer(linePumperToBuilding); linePumperToBuilding = null; }
+if (linePumperToHydrant) { map.removeLayer(linePumperToHydrant); linePumperToHydrant = null; }
+
+pumperVal.textContent = '—';
+buildingVal.textContent = '—';
+distVal.textContent = '—';
+stretchVal.textContent = '—';
+hydrantVal.textContent = '—';
+hydrantDistVal.textContent = '—';
+btype.value = '';
+
+recLine.innerHTML = '<i class="muted">Pick a building type to see line recommendations.</i>';
+setMode(null);
+}
+
+function updateEverything() {
+// Clear lines
+if (linePumperToBuilding) { map.removeLayer(linePumperToBuilding); linePumperToBuilding = null; }
+if (linePumperToHydrant) { map.removeLayer(linePumperToHydrant); linePumperToHydrant = null; }
+if (nearestHydrantMarker) { map.removeLayer(nearestHydrantMarker); nearestHydrantMarker = null; }
+
+// Update coordinates display if markers moved
+if (pumperMarker) pumperVal.textContent = fmtLatLng(pumperMarker.getLatLng());
+if (buildingMarker) buildingVal.textContent = fmtLatLng(buildingMarker.getLatLng());
+
+// Distance pumper→building
+let distFeet = null;
+if (pumperMarker && buildingMarker) {
+const a = turf.point([pumperMarker.getLatLng().lng, pumperMarker.getLatLng().lat]);
+const b = turf.point([buildingMarker.getLatLng().lng, buildingMarker.getLatLng().lat]);
+distFeet = turf.distance(a, b, { units: 'miles' }) * 5280;
+distVal.textContent = Math.round(distFeet) + ' ft';
+stretchVal.textContent = Math.round(distFeet * SLACK_FACTOR) + ' ft';
+
+// Draw line (pumper->building)
+linePumperToBuilding = L.polyline([pumperMarker.getLatLng(), buildingMarker.getLatLng()], {
+weight: 3, opacity: 0.9, color: '#d62728'
+}).addTo(map);
+} else {
+distVal.textContent = '—';
+stretchVal.textContent = '—';
+}
+
+// Nearest hydrant to PUMPER
+if (pumperMarker && hydrantMarkers.length) {
+const pt = turf.point([pumperMarker.getLatLng().lng, pumperMarker.getLatLng().lat]);
+const hydrantPoints = turf.featureCollection(hydrantMarkers.map(m => m.feature));
+const nearest = turf.nearestPoint(pt, hydrantPoints);
+
+const h = hydrantMarkers.find(m => m.feature.properties.id === nearest.properties.id);
+if (h) {
+nearestHydrantMarker = L.marker(h.getLatLng(), { icon: iconHydrantPick })
+.addTo(map)
+.bindTooltip(`Recommended Hydrant ${h.feature.properties.id}`, { direction: 'top', offset: [0, -8] });
+
+// Draw pumper->hydrant
+linePumperToHydrant = L.polyline([pumperMarker.getLatLng(), h.getLatLng()], {
+weight: 3, opacity: 0.9, dashArray: '6,6', color: '#9467bd'
+}).addTo(map);
+
+// Distance
+const aa = turf.point([pumperMarker.getLatLng().lng, pumperMarker.getLatLng().lat]);
+const bb = turf.point([h.getLatLng().lng, h.getLatLng().lat]);
+const hDistFeet = turf.distance(aa, bb, { units: 'miles' }) * 5280;
+
+hydrantVal.textContent = h.feature.properties.id;
+hydrantDistVal.textContent = Math.round(hDistFeet) + ' ft';
+}
+} else {
+hydrantVal.textContent = '—';
+hydrantDistVal.textContent = '—';
+}
+
+// Recommendations
+const occ = btype.value;
+if (occ) {
+if (!pumperMarker || !buildingMarker || distFeet === null) {
+recLine.innerHTML = '<span class="muted">Place pumper and building to get a recommendation.</span>';
+return;
+}
+const rec = recommendLine(distFeet, occ);
+recLine.innerHTML = `
+<div style="line-height:1.35">
+<div><b>Primary:</b> ${rec.primary}</div>
+<div><b>Backup:</b> ${rec.backup}</div>
+<ul style="margin:6px 0 0 18px; padding:0;">
+${rec.notes.map(n => `<li>${n}</li>`).join('')}
+</ul>
+</div>
+`;
+}
+}
+
+// Nice: fit bounds if markers exist
+function fitToAll() {
+const pts = [];
+if (pumperMarker) pts.push(pumperMarker.getLatLng());
+if (buildingMarker) pts.push(buildingMarker.getLatLng());
+if (nearestHydrantMarker) pts.push(nearestHydrantMarker.getLatLng());
+if (pts.length >= 2) {
+const bounds = L.latLngBounds(pts);
+map.fitBounds(bounds, { padding: [40, 40] });
+}
+}
+
+// Refit after updates (throttle lightly)
+let fitTimer = null;
+map.on('layeradd', () => {
+if (fitTimer) clearTimeout(fitTimer);
+fitTimer = setTimeout(fitToAll, 120);
+});
+</script>
+</body>
+</html>
