@@ -483,25 +483,10 @@ ${rec.notes.map(n => `<li>${n}</li>`).join('')}
 }
 }
 
-// 🔴 Auto-zoom has been removed. The following functions and event listeners are no longer needed.
-// function fitToAll() {
-//   const pts = [];
-//   if (pumperMarker) pts.push(pumperMarker.getLatLng());
-//   if (buildingMarker) pts.push(buildingMarker.getLatLng());
-//   if (nearestHydrantMarker) pts.push(nearestHydrantMarker.getLatLng());
-//   if (pts.length >= 2) {
-//     const bounds = L.latLngBounds(pts);
-//     map.fitBounds(bounds, { padding: [40, 40] });
-//   }
-// }
-// let fitTimer = null;
-// map.on('layeradd', () => {
-//   if (fitTimer) clearTimeout(fitTimer);
-//   fitTimer = setTimeout(fitToAll, 120);
-// });
-
-// Just a simple fit to the initial view once everything is loaded
+// This line of code will set the initial view of the map and will not auto-zoom after that.
 map.setView(INITIAL_CENTER, INITIAL_ZOOM);
+
+// The auto-zoom logic has been fully removed from the script to prevent any unexpected behavior.
 </script>
 </body>
 </html>
