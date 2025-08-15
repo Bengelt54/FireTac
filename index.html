@@ -483,10 +483,8 @@ ${rec.notes.map(n => `<li>${n}</li>`).join('')}
 }
 }
 
-// This line of code will set the initial view of the map and will not auto-zoom after that.
-map.setView(INITIAL_CENTER, INITIAL_ZOOM);
-
-// The auto-zoom logic has been fully removed from the script to prevent any unexpected behavior.
+// Auto-zoom has been fully removed from the script.
+// The map will now stay at the zoom and position you set manually.
 </script>
 </body>
 </html>
