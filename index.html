@@ -90,6 +90,9 @@ border: 1px solid #e4e4e4; border-radius: 8px; padding: 10px; background: #fff; 
 <input id="hydrantCoords" type="text" placeholder="lat, lng" />
 <button id="addHydrantBtn" class="primary" style="flex-shrink:0;">Add Hydrant</button>
 </div>
+<div style="margin-top: 8px;">
+<button id="clearHydrantsBtn" class="ghost">Clear All Hydrants</button>
+</div>
 </div>
 
 <div class="card">
@@ -138,8 +141,8 @@ Notes: Distance is straight-line (as the crow flies). Real stretches will be lon
 const INITIAL_CENTER = [39.1417, -84.6062];
 const INITIAL_ZOOM = 16;
 
-// 🔴 Start with an empty array. Hydrants will be added manually by the user.
-let HYDRANTS = [];
+// 🔴 Load hydrants from localStorage, or start with an empty array.
+let HYDRANTS = JSON.parse(localStorage.getItem('savedHydrants')) || [];
 
 // ------------------------------------------------------------
 // 2) CONFIG: Department-editable SOP rules (simple & transparent)
@@ -281,6 +284,7 @@ const btnPumper = document.getElementById('btnPumper');
 const btnBuilding = document.getElementById('btnBuilding');
 const btnReset = document.getElementById('btnReset');
 const addHydrantBtn = document.getElementById('addHydrantBtn');
+const clearHydrantsBtn = document.getElementById('clearHydrantsBtn');
 const hydrantCoordsInput = document.getElementById('hydrantCoords');
 const btype = document.getElementById('btype');
 
@@ -306,6 +310,7 @@ btnPumper.addEventListener('click', () => setMode('pumper'));
 btnBuilding.addEventListener('click', () => setMode('building'));
 btnReset.addEventListener('click', resetAll);
 addHydrantBtn.addEventListener('click', addHydrant);
+clearHydrantsBtn.addEventListener('click', clearAllHydrants);
 btype.addEventListener('change', updateEverything);
 
 // Place hydrants
@@ -334,6 +339,9 @@ if (!isNaN(lat) && !isNaN(lng)) {
 const newId = `M-${HYDRANTS.length + 1}`;
 HYDRANTS.push({ id: newId, lat, lng });
 
+// Save to local storage
+localStorage.setItem('savedHydrants', JSON.stringify(HYDRANTS));
+
 // Re-render all hydrants to include the new one
 renderHydrants();
 // Clear the input field
@@ -346,6 +354,14 @@ alert('Invalid coordinates. Please enter a valid number pair.');
 } else {
 alert('Please enter coordinates in the format: lat, lng');
 }
+}
+
+// Function to clear all hydrants
+function clearAllHydrants() {
+HYDRANTS = [];
+localStorage.removeItem('savedHydrants');
+renderHydrants();
+updateEverything();
 }
 
 // Map click handler
