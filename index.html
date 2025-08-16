@@ -5,6 +5,7 @@
 <title>Fireground Preplan — Pumper, Line, Hydrant Recommender (MVP)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 
+<!-- Leaflet (map) -->
 <link
 rel="stylesheet"
 href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -17,6 +18,7 @@ integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
 crossorigin=""
 ></script>
 
+<!-- Turf (distance / nearest point) -->
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
 <style>
@@ -64,11 +66,13 @@ border: 1px solid #e4e4e4; border-radius: 8px; padding: 10px; background: #fff; 
 <ol style="margin:0 0 6px 18px">
 <li>Click <b>Place Pumper</b>, then click the map.</li>
 <li>Click <b>Select Building</b>, then click the target building entrance.</li>
+<li><span class="muted">Optional:</span> Click <b>Set Staging Area</b>.</li>
 <li>Choose <b>Building Type</b> (required for line recommendation).</li>
 </ol>
 <div class="btnrow">
 <button id="btnPumper" class="primary">Place Pumper</button>
 <button id="btnBuilding" class="primary">Select Building</button>
+<button id="btnStaging" class="primary">Set Staging Area</button>
 <button id="btnReset" class="ghost">Reset</button>
 </div>
 <label for="btype">Building Type</label>
@@ -85,7 +89,7 @@ border: 1px solid #e4e4e4; border-radius: 8px; padding: 10px; background: #fff; 
 
 <div class="card">
 <h2>Add Hydrants</h2>
-<p class="muted">Enter coordinates and click "Add Hydrant" to add them to the map. Example: `39.1052, -84.5121`</p>
+<p class="muted">Enter coordinates or click the button to add hydrants.</p>
 <div style="display:flex; gap: 8px;">
 <input id="hydrantCoords" type="text" placeholder="lat, lng" />
 <button id="addHydrantBtn" class="primary" style="flex-shrink:0;">Add Hydrant</button>
@@ -100,6 +104,7 @@ border: 1px solid #e4e4e4; border-radius: 8px; padding: 10px; background: #fff; 
 <div class="kv">
 <div>Pumper</div><div id="pumperVal" class="mono">—</div>
 <div>Building</div><div id="buildingVal" class="mono">—</div>
+<div>Staging Area</div><div id="stagingVal" class="mono">—</div>
 <div>Distance (ft)</div><div id="distVal">—</div>
 <div>Suggested Stretch (ft)</div><div id="stretchVal">—</div>
 <div>Nearest Hydrant</div><div id="hydrantVal" class="mono">—</div>
@@ -122,6 +127,8 @@ Notes: Distance is straight-line (as the crow flies). Real stretches will be lon
 <div><span class="dot" style="background:#d62728"></span>Building</div>
 <div><span class="dot" style="background:#2ca02c"></span>Hydrant</div>
 <div><span class="dot" style="background:#9467bd"></span>Recommended Hydrant</div>
+<div><span class="dot" style="background:#ff7f0e"></span>Staging Area</div>
+<div style="display:flex; align-items:center; gap: 6px;"><div style="width:10px;height:10px;border-radius:50%;border:2px solid #ff0000;background:rgba(255, 0, 0, 0.2)"></div>No-Go Zone</div>
 </div>
 </div>
 
@@ -138,23 +145,26 @@ Notes: Distance is straight-line (as the crow flies). Real stretches will be lon
 // ------------------------------------------------------------
 
 // Center on Cheviot, Ohio by default
-const INITIAL_CENTER = [39.16953, -84.51761];
+const INITIAL_CENTER = [39.16952, -84.51762];
 const INITIAL_ZOOM = 16;
 
 // 🔴 Load hydrants from localStorage, or start with an empty array.
 let HYDRANTS = JSON.parse(localStorage.getItem('savedHydrants')) || [];
 
+// Add a 20% slack factor for real-world hose stretches
+const SLACK_FACTOR = 1.2;
+
+// 🔴 NEW: Configure the radius of the "No-Go Zone" for incoming companies in feet.
+// This should be based on your department's SOPs and apparatus size.
+const NO_GO_ZONE_RADIUS_FT = 300; // Example: 300 feet
+
 // ------------------------------------------------------------
 // 2) CONFIG: Department-editable SOP rules (simple & transparent)
 // Return a structured recommendation given distance + occupancy
 // ------------------------------------------------------------
-// Add a 20% slack factor for real-world hose stretches
-const SLACK_FACTOR = 1.2;
-
 function recommendLine(distanceFt, occupancy) {
 const d = distanceFt * SLACK_FACTOR; // Use adjusted distance for recommendations
 const roundUp50 = (x) => Math.ceil(x / 50) * 50;
-
 const suggestedStretch = roundUp50(d);
 
 // Default fallback
@@ -179,7 +189,6 @@ rec.backup = "Consider moving pumper up / add company";
 rec.notes.push("Long stretch — consider re-positioning closer if possible.");
 }
 break;
-
 case "multires":
 if (d <= 200) {
 rec.primary = "1¾\" preconnect (150–200 ft), 150–185 GPM";
@@ -193,7 +202,6 @@ rec.backup = "Second line for hallway protection";
 rec.notes.push("Account for interior common areas/long hallways.");
 }
 break;
-
 case "commercial":
 if (d <= 150) {
 rec.primary = "2½\" attack line (250+ GPM) — commercial fireload";
@@ -207,7 +215,6 @@ rec.backup = "Portable monitor; evaluate re-positioning";
 rec.notes.push("Distance/flow indicate larger line & possible master stream.");
 }
 break;
-
 case "industrial":
 if (d <= 150) {
 rec.primary = "2½\" attack (250–325+ GPM) — high fireload";
@@ -221,7 +228,6 @@ rec.backup = "Consider defensive posture if conditions dictate";
 rec.notes.push("Long lay; prioritize water supply & big water.");
 }
 break;
-
 case "school":
 if (d <= 200) {
 rec.primary = "2\" line (200+ GPM) for larger compartments";
@@ -234,14 +240,12 @@ rec.primary = "3\" leader + gated wye; 2\"/2½\" inside";
 rec.backup = "Monitor; consider re-positioning for shorter stretch";
 }
 break;
-
 case "highrise":
 rec.primary = "Standpipe operation: 2½\" from floor below, smooth bore tip";
 rec.backup = "Reduce to 1¾\" only per SOPs/risers after control";
 rec.notes.push("Hook to FDC; pumper supports standpipe. Distance street→door less critical than riser layout.");
 break;
 }
-
 return { ...rec, suggestedStretch };
 }
 
@@ -263,6 +267,10 @@ const iconBuilding = L.divIcon({
 html: '<div style="width:14px;height:14px;background:#d62728;border:2px solid #7a1515;border-radius:4px"></div>',
 className: '', iconSize: [18, 18], iconAnchor: [9, 9]
 });
+const iconStaging = L.divIcon({
+html: '<div style="width:14px;height:14px;background:#ff7f0e;border:2px solid #7c4819;border-radius:4px"></div>',
+className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+});
 const iconHydrant = L.divIcon({
 html: '<div style="width:10px;height:10px;background:#2ca02c;border:2px solid #195d19;border-radius:50%"></div>',
 className: '', iconSize: [14, 14], iconAnchor: [7, 7]
@@ -273,15 +281,17 @@ className: '', iconSize: [16, 16], iconAnchor: [8, 8]
 });
 
 // State
-let mode = null; // 'pumper' | 'building' | null
-let pumperMarker = null, buildingMarker = null;
+let mode = null; // 'pumper' | 'building' | 'staging' | null
+let pumperMarker = null, buildingMarker = null, stagingMarker = null;
 let hydrantMarkers = [];
 let nearestHydrantMarker = null;
 let linePumperToBuilding = null, linePumperToHydrant = null;
+let noGoZoneCircle = null;
 
 // UI refs
 const btnPumper = document.getElementById('btnPumper');
 const btnBuilding = document.getElementById('btnBuilding');
+const btnStaging = document.getElementById('btnStaging');
 const btnReset = document.getElementById('btnReset');
 const addHydrantBtn = document.getElementById('addHydrantBtn');
 const clearHydrantsBtn = document.getElementById('clearHydrantsBtn');
@@ -290,6 +300,7 @@ const btype = document.getElementById('btype');
 
 const pumperVal = document.getElementById('pumperVal');
 const buildingVal = document.getElementById('buildingVal');
+const stagingVal = document.getElementById('stagingVal');
 const distVal = document.getElementById('distVal');
 const stretchVal = document.getElementById('stretchVal');
 const hydrantVal = document.getElementById('hydrantVal');
@@ -304,10 +315,12 @@ function setMode(newMode) {
 mode = newMode;
 btnPumper.classList.toggle('primary', mode === 'pumper');
 btnBuilding.classList.toggle('primary', mode === 'building');
+btnStaging.classList.toggle('primary', mode === 'staging');
 }
 
 btnPumper.addEventListener('click', () => setMode('pumper'));
 btnBuilding.addEventListener('click', () => setMode('building'));
+btnStaging.addEventListener('click', () => setMode('staging'));
 btnReset.addEventListener('click', resetAll);
 addHydrantBtn.addEventListener('click', addHydrant);
 clearHydrantsBtn.addEventListener('click', clearAllHydrants);
@@ -333,20 +346,12 @@ const coords = hydrantCoordsInput.value.split(',').map(c => c.trim());
 if (coords.length === 2) {
 const lat = parseFloat(coords[0]);
 const lng = parseFloat(coords[1]);
-
 if (!isNaN(lat) && !isNaN(lng)) {
-// Create a unique ID for the new hydrant
 const newId = `M-${HYDRANTS.length + 1}`;
 HYDRANTS.push({ id: newId, lat, lng });
-
-// Save to local storage
 localStorage.setItem('savedHydrants', JSON.stringify(HYDRANTS));
-
-// Re-render all hydrants to include the new one
 renderHydrants();
-// Clear the input field
 hydrantCoordsInput.value = '';
-// Update the map (in case pumper and building are already placed)
 updateEverything();
 } else {
 alert('Invalid coordinates. Please enter a valid number pair.');
@@ -382,6 +387,13 @@ buildingMarker.on('dragend', updateEverything);
 buildingVal.textContent = fmtLatLng(e.latlng);
 setMode(null);
 updateEverything();
+} else if (mode === 'staging') {
+if (stagingMarker) map.removeLayer(stagingMarker);
+stagingMarker = L.marker(e.latlng, { icon: iconStaging, draggable: true }).addTo(map).bindTooltip('Staging Area', {permanent:false});
+stagingMarker.on('dragend', updateEverything);
+stagingVal.textContent = fmtLatLng(e.latlng);
+setMode(null);
+updateEverything();
 }
 });
 
@@ -389,12 +401,15 @@ function resetAll() {
 mode = null;
 if (pumperMarker) { map.removeLayer(pumperMarker); pumperMarker = null; }
 if (buildingMarker) { map.removeLayer(buildingMarker); buildingMarker = null; }
+if (stagingMarker) { map.removeLayer(stagingMarker); stagingMarker = null; }
 if (nearestHydrantMarker) { map.removeLayer(nearestHydrantMarker); nearestHydrantMarker = null; }
 if (linePumperToBuilding) { map.removeLayer(linePumperToBuilding); linePumperToBuilding = null; }
 if (linePumperToHydrant) { map.removeLayer(linePumperToHydrant); linePumperToHydrant = null; }
+if (noGoZoneCircle) { map.removeLayer(noGoZoneCircle); noGoZoneCircle = null; }
 
 pumperVal.textContent = '—';
 buildingVal.textContent = '—';
+stagingVal.textContent = '—';
 distVal.textContent = '—';
 stretchVal.textContent = '—';
 hydrantVal.textContent = '—';
@@ -406,14 +421,16 @@ setMode(null);
 }
 
 function updateEverything() {
-// Clear lines
+// Clear old lines and markers
 if (linePumperToBuilding) { map.removeLayer(linePumperToBuilding); linePumperToBuilding = null; }
 if (linePumperToHydrant) { map.removeLayer(linePumperToHydrant); linePumperToHydrant = null; }
 if (nearestHydrantMarker) { map.removeLayer(nearestHydrantMarker); nearestHydrantMarker = null; }
+if (noGoZoneCircle) { map.removeLayer(noGoZoneCircle); noGoZoneCircle = null; }
 
 // Update coordinates display if markers moved
 if (pumperMarker) pumperVal.textContent = fmtLatLng(pumperMarker.getLatLng());
 if (buildingMarker) buildingVal.textContent = fmtLatLng(buildingMarker.getLatLng());
+if (stagingMarker) stagingVal.textContent = fmtLatLng(stagingMarker.getLatLng());
 
 // Distance pumper→building
 let distFeet = null;
@@ -433,19 +450,39 @@ distVal.textContent = '—';
 stretchVal.textContent = '—';
 }
 
-// Nearest hydrant to PUMPER
+// 🔴 NEW: Find nearest hydrant to PUMPER, but AVOIDING the "No-Go Zone"
 if (pumperMarker && hydrantMarkers.length) {
-const pt = turf.point([pumperMarker.getLatLng().lng, pumperMarker.getLatLng().lat]);
-const hydrantPoints = turf.featureCollection(hydrantMarkers.map(m => m.feature));
-const nearest = turf.nearestPoint(pt, hydrantPoints);
+// Set the center of the "no-go" zone to the staging area if it exists, otherwise use the pumper's location
+const noGoZoneCenter = stagingMarker ? stagingMarker.getLatLng() : pumperMarker.getLatLng();
+const noGoZonePoint = turf.point([noGoZoneCenter.lng, noGoZoneCenter.lat]);
 
+// Filter out hydrants that are inside the "no-go" zone
+const validHydrantFeatures = hydrantMarkers.filter(m => {
+const hydrantPoint = turf.point([m.getLatLng().lng, m.getLatLng().lat]);
+const distanceToZoneCenter = turf.distance(noGoZonePoint, hydrantPoint, { units: 'miles' }) * 5280;
+return distanceToZoneCenter > NO_GO_ZONE_RADIUS_FT;
+}).map(m => m.feature);
+
+// Draw the "no-go" zone circle on the map
+noGoZoneCircle = L.circle(noGoZoneCenter, {
+radius: NO_GO_ZONE_RADIUS_FT * 0.3048, // Convert feet to meters for Leaflet
+color: '#ff0000',
+fillColor: '#ff0000',
+fillOpacity: 0.2
+}).addTo(map);
+
+// Find the nearest valid hydrant
+if (validHydrantFeatures.length > 0) {
+const pumperPoint = turf.point([pumperMarker.getLatLng().lng, pumperMarker.getLatLng().lat]);
+const nearest = turf.nearestPoint(pumperPoint, turf.featureCollection(validHydrantFeatures));
 const h = hydrantMarkers.find(m => m.feature.properties.id === nearest.properties.id);
+
 if (h) {
 nearestHydrantMarker = L.marker(h.getLatLng(), { icon: iconHydrantPick })
 .addTo(map)
 .bindTooltip(`Recommended Hydrant ${h.feature.properties.id}`, { direction: 'top', offset: [0, -8] });
 
-// Draw pumper->hydrant
+// Draw pumper->hydrant line
 linePumperToHydrant = L.polyline([pumperMarker.getLatLng(), h.getLatLng()], {
 weight: 3, opacity: 0.9, dashArray: '6,6', color: '#9467bd'
 }).addTo(map);
@@ -454,9 +491,13 @@ weight: 3, opacity: 0.9, dashArray: '6,6', color: '#9467bd'
 const aa = turf.point([pumperMarker.getLatLng().lng, pumperMarker.getLatLng().lat]);
 const bb = turf.point([h.getLatLng().lng, h.getLatLng().lat]);
 const hDistFeet = turf.distance(aa, bb, { units: 'miles' }) * 5280;
-
 hydrantVal.textContent = h.feature.properties.id;
 hydrantDistVal.textContent = Math.round(hDistFeet) + ' ft';
+}
+} else {
+// No valid hydrants outside the no-go zone
+hydrantVal.textContent = '— No clear hydrants nearby —';
+hydrantDistVal.textContent = '—';
 }
 } else {
 hydrantVal.textContent = '—';
@@ -482,7 +523,15 @@ ${rec.notes.map(n => `<li>${n}</li>`).join('')}
 `;
 }
 }
+
+// 🔴 NEW: Place pumper on map when it loads
+window.onload = function() {
+if (!pumperMarker) {
+pumperMarker = L.marker(INITIAL_CENTER, { icon: iconPumper, draggable: true }).addTo(map).bindTooltip('Pumper', {permanent:false});
+pumperMarker.on('dragend', updateEverything);
+pumperVal.textContent = fmtLatLng(INITIAL_CENTER);
+}
+};
 </script>
 </body>
 </html>
-
