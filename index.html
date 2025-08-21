@@ -13,7 +13,7 @@
     />
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""
     ></script>
 
@@ -102,6 +102,14 @@
             from {top:-300px; opacity:0}
             to {top:0; opacity:1}
         }
+        .confirm-delete {
+            display: none;
+            background: #fff;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -119,6 +127,7 @@
                     <button id="btnPumper" class="primary">Place Pumper</button>
                     <button id="btnBuilding" class="primary">Select Building</button>
                     <button id="btnPreplan" class="primary">Create Preplan</button>
+                    <button id="btnHydrant" class="primary">Place Hydrant</button>
                     <button id="btnReset" class="ghost">Reset</button>
                 </div>
                 <label for="btype">Building Type</label>
@@ -134,13 +143,8 @@
             </div>
 
             <div class="card">
-                <h2>Add Hydrants</h2>
-                <p class="muted">Enter coordinates and click "Add Hydrant" to add them to the map. Example: `39.1052, -84.5121`</p>
-                <div style="display:flex; gap: 8px;">
-                    <input id="hydrantCoords" type="text" placeholder="lat, lng" />
-                    <button id="addHydrantBtn" class="primary" style="flex-shrink:0;">Add Hydrant</button>
-                </div>
-                <div style="margin-top: 8px;">
+                <h2>Saved Hydrants</h2>
+                <div class="btnrow">
                     <button id="clearHydrantsBtn" class="ghost">Clear All Hydrants</button>
                 </div>
             </div>
@@ -266,6 +270,25 @@
             </form>
         </div>
     </div>
+    
+    <!-- The Hydrant Edit Modal -->
+    <div id="hydrantEditModal" class="modal">
+        <div class="modal-content">
+            <h2 id="hydrantModalTitle">Edit Hydrant</h2>
+            <form id="hydrantForm" class="flex flex-col gap-4">
+                <input type="hidden" id="hydrantIndex">
+                <div>
+                    <label for="hydrantIdInput" class="block text-sm font-medium text-gray-700">Hydrant ID:</label>
+                    <input type="text" id="hydrantIdInput" name="hydrantIdInput" required>
+                </div>
+                <div class="btnrow" style="margin-top: 16px; justify-content: flex-end;">
+                    <button type="button" id="cancelHydrantBtn" class="ghost">Cancel</button>
+                    <button type="submit" class="primary" id="saveHydrantBtn">Save Hydrant</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
 
     <script>
         // ------------------------------------------------------------
@@ -361,14 +384,18 @@
         const btnPumper = document.getElementById('btnPumper');
         const btnBuilding = document.getElementById('btnBuilding');
         const btnPreplan = document.getElementById('btnPreplan');
+        const btnHydrant = document.getElementById('btnHydrant');
         const btnReset = document.getElementById('btnReset');
-        const addHydrantBtn = document.getElementById('addHydrantBtn');
         const clearHydrantsBtn = document.getElementById('clearHydrantsBtn');
-        const hydrantCoordsInput = document.getElementById('hydrantCoords');
         const btype = document.getElementById('btype');
         const preplanModal = document.getElementById('preplanModal');
         const preplanForm = document.getElementById('preplanForm');
         const cancelPreplanBtn = document.getElementById('cancelPreplanBtn');
+        const hydrantEditModal = document.getElementById('hydrantEditModal');
+        const hydrantForm = document.getElementById('hydrantForm');
+        const cancelHydrantBtn = document.getElementById('cancelHydrantBtn');
+        const hydrantIndexInput = document.getElementById('hydrantIndex');
+        const hydrantIdInput = document.getElementById('hydrantIdInput');
         const modalTitle = document.getElementById('modalTitle');
         const preplanIndexInput = document.getElementById('preplanIndex');
 
@@ -389,13 +416,14 @@
             btnPumper.classList.toggle('primary', mode === 'pumper');
             btnBuilding.classList.toggle('primary', mode === 'building');
             btnPreplan.classList.toggle('primary', mode === 'preplan');
+            btnHydrant.classList.toggle('primary', mode === 'hydrant');
         }
 
         btnPumper.addEventListener('click', () => setMode('pumper'));
         btnBuilding.addEventListener('click', () => setMode('building'));
         btnPreplan.addEventListener('click', () => setMode('preplan'));
+        btnHydrant.addEventListener('click', () => setMode('hydrant'));
         btnReset.addEventListener('click', resetAll);
-        addHydrantBtn.addEventListener('click', addHydrant);
         clearHydrantsBtn.addEventListener('click', clearAllHydrants);
         btype.addEventListener('change', updateEverything);
 
@@ -403,37 +431,80 @@
         const hydrantLayer = L.layerGroup().addTo(map);
         function renderHydrants() {
             hydrantLayer.clearLayers();
-            hydrantMarkers = HYDRANTS.map(h => {
-                const m = L.marker([h.lat, h.lng], { icon: iconHydrant })
-                    .addTo(hydrantLayer)
-                    .bindTooltip(`Hydrant ${h.id}`, { direction: 'top', offset: [0, -8] });
-                m.feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [h.lng, h.lat] }, properties: { id: h.id } };
-                return m;
+            hydrantMarkers = HYDRANTS.map((h, index) => {
+                const marker = L.marker([h.lat, h.lng], { icon: iconHydrant })
+                    .addTo(hydrantLayer);
+                
+                const popupContent = document.createElement('div');
+                popupContent.innerHTML = `
+                    <h3>Hydrant ${h.id}</h3>
+                    <p class="muted">
+                        Lat: ${h.lat.toFixed(5)}<br>
+                        Lng: ${h.lng.toFixed(5)}
+                    </p>
+                    <div class="btnrow" style="margin-top:10px;">
+                        <button class="ghost edit-hydrant">Edit</button>
+                        <button class="ghost delete-hydrant">Delete</button>
+                    </div>
+                    <div class="confirm-delete">
+                        <p style="margin: 0 0 8px;">Are you sure?</p>
+                        <div class="btnrow">
+                            <button class="ghost cancel-delete">Cancel</button>
+                            <button class="primary confirm-delete-btn">Delete</button>
+                        </div>
+                    </div>
+                `;
+
+                popupContent.querySelector('.edit-hydrant').addEventListener('click', () => editHydrant(index));
+                popupContent.querySelector('.delete-hydrant').addEventListener('click', () => {
+                    popupContent.querySelector('.confirm-delete').style.display = 'block';
+                });
+                popupContent.querySelector('.cancel-delete').addEventListener('click', () => {
+                    popupContent.querySelector('.confirm-delete').style.display = 'none';
+                });
+                popupContent.querySelector('.confirm-delete-btn').addEventListener('click', () => deleteHydrant(index));
+
+                marker.bindPopup(popupContent);
+                marker.feature = { type: 'Feature', geometry: { type: 'Point', coordinates: [h.lng, h.lat] }, properties: { id: h.id } };
+                return marker;
             });
         }
         renderHydrants();
 
-        function addHydrant() {
-            const coords = hydrantCoordsInput.value.split(',').map(c => c.trim());
-            if (coords.length === 2) {
-                const lat = parseFloat(coords[0]);
-                const lng = parseFloat(coords[1]);
-
-                if (!isNaN(lat) && !isNaN(lng)) {
-                    const newId = `H-${HYDRANTS.length + 1}`;
-                    HYDRANTS.push({ id: newId, lat, lng });
-                    localStorage.setItem('savedHydrants', JSON.stringify(HYDRANTS));
-                    renderHydrants();
-                    hydrantCoordsInput.value = '';
-                    updateEverything();
-                } else {
-                    // Replaced alert with a custom message for better UX in an iframe
-                    console.error('Invalid coordinates. Please enter a valid number pair.');
-                }
-            } else {
-                console.error('Please enter coordinates in the format: lat, lng');
-            }
+        function deleteHydrant(index) {
+            HYDRANTS.splice(index, 1);
+            localStorage.setItem('savedHydrants', JSON.stringify(HYDRANTS));
+            renderHydrants();
+            map.closePopup();
+            updateEverything();
         }
+
+        function editHydrant(index) {
+            const hydrant = HYDRANTS[index];
+            hydrantIndexInput.value = index;
+            hydrantIdInput.value = hydrant.id;
+            hydrantEditModal.style.display = 'block';
+        }
+
+        hydrantForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const index = hydrantIndexInput.value;
+            const newId = hydrantIdInput.value;
+
+            if (index !== '') {
+                const hydrant = HYDRANTS[index];
+                hydrant.id = newId;
+                localStorage.setItem('savedHydrants', JSON.stringify(HYDRANTS));
+                renderHydrants();
+                updateEverything();
+            }
+            
+            hydrantEditModal.style.display = 'none';
+        });
+
+        cancelHydrantBtn.addEventListener('click', () => {
+            hydrantEditModal.style.display = 'none';
+        });
 
         function clearAllHydrants() {
             HYDRANTS = [];
@@ -500,10 +571,13 @@
         renderPreplans();
 
         function deletePreplan(index) {
-            PREPLANS.splice(index, 1);
-            localStorage.setItem('savedPreplans', JSON.stringify(PREPLANS));
-            renderPreplans();
-            map.closePopup();
+            const confirmed = window.confirm("Are you sure you want to delete this preplan?");
+            if (confirmed) {
+                PREPLANS.splice(index, 1);
+                localStorage.setItem('savedPreplans', JSON.stringify(PREPLANS));
+                renderPreplans();
+                map.closePopup();
+            }
         }
 
         function editPreplan(index) {
@@ -554,6 +628,14 @@
                 preplanIndexInput.value = '';
                 modalTitle.textContent = "Create New Preplan";
                 preplanModal.style.display = 'block';
+            } else if (mode === 'hydrant') {
+                 // Create a new hydrant with a temporary ID
+                const newId = `H-${HYDRANTS.length + 1}`;
+                HYDRANTS.push({ id: newId, lat: e.latlng.lat, lng: e.latlng.lng });
+                localStorage.setItem('savedHydrants', JSON.stringify(HYDRANTS));
+                renderHydrants();
+                setMode(null);
+                updateEverything();
             }
         });
 
@@ -579,15 +661,15 @@
                 const preplan = PREPLANS[index];
                 preplan.name = preplanName;
                 preplan.hazards = preplanHazards;
-                preplan.notes = preplanNotes;
-                preplan.floors = preplanFloors;
-                preplan.sqft = preplanSqFt;
-                preplan.occupancy = preplanOccupancy;
-                preplan.sprinkler = preplanSprinkler;
-                preplan.fireAlarm = preplanFireAlarm;
-                preplan.ownerName = preplanOwnerName;
-                preplan.ownerNumber = preplanOwnerNumber;
-                preplan.gateCode = preplanGateCode;
+                preplan.notes = preplan.notes;
+                preplan.floors = preplan.floors;
+                preplan.sqft = preplan.sqft;
+                preplan.occupancy = preplan.occupancy;
+                preplan.sprinkler = preplan.sprinkler;
+                preplan.fireAlarm = preplan.fireAlarm;
+                preplan.ownerName = preplan.ownerName;
+                preplan.ownerNumber = preplan.ownerNumber;
+                preplan.gateCode = preplan.gateCode;
             } else {
                 // Create new preplan
                 const latlng = tempPreplanMarker.getLatLng();
