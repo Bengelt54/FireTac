@@ -144,9 +144,7 @@
 
             <div class="card">
                 <h2>Saved Hydrants</h2>
-                <div class="btnrow">
-                    <button id="clearHydrantsBtn" class="ghost">Clear All Hydrants</button>
-                </div>
+                <p class="muted">Click on a hydrant on the map to edit or delete it.</p>
             </div>
 
             <div class="card">
@@ -386,7 +384,6 @@
         const btnPreplan = document.getElementById('btnPreplan');
         const btnHydrant = document.getElementById('btnHydrant');
         const btnReset = document.getElementById('btnReset');
-        const clearHydrantsBtn = document.getElementById('clearHydrantsBtn');
         const btype = document.getElementById('btype');
         const preplanModal = document.getElementById('preplanModal');
         const preplanForm = document.getElementById('preplanForm');
@@ -424,7 +421,6 @@
         btnPreplan.addEventListener('click', () => setMode('preplan'));
         btnHydrant.addEventListener('click', () => setMode('hydrant'));
         btnReset.addEventListener('click', resetAll);
-        clearHydrantsBtn.addEventListener('click', clearAllHydrants);
         btype.addEventListener('change', updateEverything);
 
         // --- Hydrant Functions ---
@@ -505,13 +501,6 @@
         cancelHydrantBtn.addEventListener('click', () => {
             hydrantEditModal.style.display = 'none';
         });
-
-        function clearAllHydrants() {
-            HYDRANTS = [];
-            localStorage.removeItem('savedHydrants');
-            renderHydrants();
-            updateEverything();
-        }
 
         // --- Preplan Functions ---
         const preplanLayer = L.layerGroup().addTo(map);
