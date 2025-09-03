@@ -563,8 +563,8 @@
                 photoModal.style.display = 'flex';
             });
             const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = '×';
             deleteBtn.className = 'photo-delete-btn';
-            deleteBtn.innerHTML = '&times;';
             deleteBtn.onclick = () => imgWrapper.remove();
             imgWrapper.appendChild(img);
             imgWrapper.appendChild(deleteBtn);
@@ -923,7 +923,7 @@
         // --- Preplan Modal and Form Logic ---
         preplanPhotosInput.addEventListener('change', (e) => {
             const files = e.target.files;
-            photoPreviewContainer.innerHTML = '';
+            photoPreviewContainer.innerHTML = ''; // Clear previous previews
             for (const file of files) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
