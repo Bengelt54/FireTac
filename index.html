@@ -113,6 +113,7 @@
             object-fit: cover;
             border-radius: 6px;
             border: 1px solid #ccc;
+            cursor: pointer;
         }
         .photo-delete-btn {
             position: absolute;
@@ -143,6 +144,53 @@
             border: 1px solid #ddd;
             border-radius: 6px;
             margin-top: 8px;
+        }
+
+        /* Styles for the expanded image modal */
+        #photoModal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(8px);
+            align-items: center;
+            justify-content: center;
+        }
+
+        #photoModal .modal-content {
+            background-color: transparent;
+            margin: auto;
+            padding: 0;
+            box-shadow: none;
+            max-width: 90%;
+            max-height: 90%;
+            animation-name: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        #expandedImage {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 25px;
+            color: #fff;
+            font-size: 40px;
+            font-weight: bold;
+            transition: 0.3s;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -346,6 +394,14 @@
             </div>
         </div>
     </div>
+    
+    <!-- Expanded Photo Modal -->
+    <div id="photoModal" class="modal" style="display: none;">
+        <span class="close-btn">&times;</span>
+        <div class="modal-content">
+            <img id="expandedImage" src="" alt="Expanded Image">
+        </div>
+    </div>
 
     <script>
         // ------------------------------------------------------------
@@ -470,6 +526,10 @@
         const confirmMessage = document.getElementById('confirmMessage');
         const okConfirmBtn = document.getElementById('okConfirmBtn');
         const cancelConfirmBtn = document.getElementById('cancelConfirmBtn');
+        
+        const photoModal = document.getElementById('photoModal');
+        const expandedImage = document.getElementById('expandedImage');
+        const closeBtn = document.querySelector('#photoModal .close-btn');
 
         const pumperVal = document.getElementById('pumperVal');
         const buildingVal = document.getElementById('buildingVal');
@@ -489,6 +549,36 @@
             btnBuilding.classList.toggle('primary', mode === 'building');
             btnPreplan.classList.toggle('primary', mode === 'preplan');
             btnHydrant.classList.toggle('primary', mode === 'hydrant');
+        }
+        
+        // Function to create a photo preview element and attach listeners
+        function createPhotoPreview(src) {
+            const imgWrapper = document.createElement('div');
+            imgWrapper.className = 'photo-preview-wrapper';
+            const img = document.createElement('img');
+            img.src = src;
+            img.className = 'photo-preview';
+            img.addEventListener('click', () => {
+                expandedImage.src = img.src;
+                photoModal.style.display = 'flex';
+            });
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'photo-delete-btn';
+            deleteBtn.innerHTML = '&times;';
+            deleteBtn.onclick = () => imgWrapper.remove();
+            imgWrapper.appendChild(img);
+            imgWrapper.appendChild(deleteBtn);
+            return imgWrapper;
+        }
+
+        // Expanded photo modal close logic
+        closeBtn.onclick = () => {
+            photoModal.style.display = 'none';
+        }
+        window.onclick = (event) => {
+            if (event.target == photoModal) {
+                photoModal.style.display = 'none';
+            }
         }
 
         btnPumper.addEventListener('click', () => setMode('pumper'));
@@ -628,6 +718,14 @@
                         <button class="ghost delete-preplan" data-index="${preplanIndex}">Delete</button>
                     </div>
                 `;
+                
+                // Add click handlers for image previews in the popup
+                popupContent.querySelectorAll('.photo-preview').forEach(img => {
+                    img.addEventListener('click', () => {
+                        expandedImage.src = img.src;
+                        photoModal.style.display = 'flex';
+                    });
+                });
 
                 // Add click handlers for the new buttons
                 popupContent.querySelector('.edit-preplan').addEventListener('click', () => editPreplan(preplanIndex));
@@ -758,18 +856,7 @@
             photoPreviewContainer.innerHTML = '';
             if (preplan.photos) {
                 preplan.photos.forEach(photo => {
-                    const imgWrapper = document.createElement('div');
-                    imgWrapper.className = 'photo-preview-wrapper';
-                    const img = document.createElement('img');
-                    img.src = photo;
-                    img.className = 'photo-preview';
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'photo-delete-btn';
-                    deleteBtn.innerHTML = '&times;';
-                    deleteBtn.onclick = () => imgWrapper.remove();
-                    imgWrapper.appendChild(img);
-                    imgWrapper.appendChild(deleteBtn);
-                    photoPreviewContainer.appendChild(imgWrapper);
+                    photoPreviewContainer.appendChild(createPhotoPreview(photo));
                 });
             }
 
@@ -840,18 +927,7 @@
             for (const file of files) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
-                    const imgWrapper = document.createElement('div');
-                    imgWrapper.className = 'photo-preview-wrapper';
-                    const img = document.createElement('img');
-                    img.src = e.target.result;
-                    img.className = 'photo-preview';
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'photo-delete-btn';
-                    deleteBtn.innerHTML = '&times;';
-                    deleteBtn.onclick = () => imgWrapper.remove();
-                    imgWrapper.appendChild(img);
-                    imgWrapper.appendChild(deleteBtn);
-                    photoPreviewContainer.appendChild(imgWrapper);
+                    photoPreviewContainer.appendChild(createPhotoPreview(e.target.result));
                 };
                 reader.readAsDataURL(file);
             }
