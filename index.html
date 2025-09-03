@@ -104,12 +104,33 @@
             gap: 8px;
             margin-top: 8px;
         }
+        .photo-preview-wrapper {
+            position: relative;
+        }
         .photo-preview {
             width: 80px;
             height: 80px;
             object-fit: cover;
             border-radius: 6px;
             border: 1px solid #ccc;
+        }
+        .photo-delete-btn {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #d62728;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 14px;
+            line-height: 1;
+            padding: 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         @keyframes animatetop {
             from {top:-300px; opacity:0}
@@ -737,10 +758,18 @@
             photoPreviewContainer.innerHTML = '';
             if (preplan.photos) {
                 preplan.photos.forEach(photo => {
+                    const imgWrapper = document.createElement('div');
+                    imgWrapper.className = 'photo-preview-wrapper';
                     const img = document.createElement('img');
                     img.src = photo;
                     img.className = 'photo-preview';
-                    photoPreviewContainer.appendChild(img);
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'photo-delete-btn';
+                    deleteBtn.innerHTML = '&times;';
+                    deleteBtn.onclick = () => imgWrapper.remove();
+                    imgWrapper.appendChild(img);
+                    imgWrapper.appendChild(deleteBtn);
+                    photoPreviewContainer.appendChild(imgWrapper);
                 });
             }
 
@@ -811,10 +840,18 @@
             for (const file of files) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
+                    const imgWrapper = document.createElement('div');
+                    imgWrapper.className = 'photo-preview-wrapper';
                     const img = document.createElement('img');
                     img.src = e.target.result;
                     img.className = 'photo-preview';
-                    photoPreviewContainer.appendChild(img);
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'photo-delete-btn';
+                    deleteBtn.innerHTML = '&times;';
+                    deleteBtn.onclick = () => imgWrapper.remove();
+                    imgWrapper.appendChild(img);
+                    imgWrapper.appendChild(deleteBtn);
+                    photoPreviewContainer.appendChild(imgWrapper);
                 };
                 reader.readAsDataURL(file);
             }
